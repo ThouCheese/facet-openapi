@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WowSoTest",
+  "type": "object",
+  "required": [
+    "inner",
+    "outer"
+  ],
+  "properties": {
+    "inner": {
+      "$ref": "#/definitions/InnerWowSoTest"
+    },
+    "outer": {
+      "type": "integer",
+      "format": "int32"
+    }
+  },
+  "definitions": {
+    "InnerWowSoTest": {
+      "type": "object",
+      "required": [
+        "payload"
+      ],
+      "properties": {
+        "payload": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    }
+  }
+}

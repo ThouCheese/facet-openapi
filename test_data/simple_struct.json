@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WowSoTest",
+  "type": "object",
+  "required": [
+    "much",
+    "tdd",
+    "is",
+    "happening"
+  ],
+  "properties": {
+    "much": {
+      "type": "string"
+    },
+    "tdd": {
+      "type": "boolean"
+    },
+    "is": {
+      "type": "integer",
+      "format": "int8"
+    },
+    "happening": {
+      "type": "integer",
+      "format": "uint"
+    }
+  }
+}
