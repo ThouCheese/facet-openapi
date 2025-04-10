@@ -16,15 +16,31 @@
     }
   },
   "definitions": {
+    "InnerInnerWowSoTest": {
+      "type": "object",
+      "required": [
+        "payload2"
+      ],
+      "properties": {
+        "payload2": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
     "InnerWowSoTest": {
       "type": "object",
       "required": [
-        "payload"
+        "payload",
+        "subinner"
       ],
       "properties": {
         "payload": {
           "type": "integer",
           "format": "int32"
+        },
+        "subinner": {
+          "$ref": "#/definitions/InnerInnerWowSoTest"
         }
       }
     }

@@ -1,10 +1,12 @@
 use std::{collections::HashMap, fmt::Formatter};
 
 pub fn schema<T: facet::Facet>() -> Schema {
+    let (root_property, definitions) = analyze_shape(T::SHAPE);
     Schema {
         schema: "http://json-schema.org/draft-07/schema#",
         title: get_type_name(T::SHAPE),
-        root_property: get_property(T::SHAPE),
+        root_property,
+        definitions,
     }
 }
 
@@ -18,8 +20,9 @@ fn get_type_name(shape: &facet::Shape) -> String {
     format!("{}", MyTypeName(shape.vtable.type_name))
 }
 
-fn get_property(shape: &facet::Shape) -> Property {
-    match shape.def {
+fn analyze_shape(shape: &facet::Shape) -> (Property, Definitions) {
+    let mut definitions = Definitions::new();
+    let property = match shape.def {
         facet::Def::Scalar(scalar_def) => match scalar_def.affinity {
             facet::ScalarAffinity::Number(number_affinity) => match number_affinity.bits {
                 facet::NumberBits::Integer { bits, sign } => Property::Type {
@@ -41,7 +44,6 @@ fn get_property(shape: &facet::Shape) -> Property {
                     }),
                     required: None,
                     properties: None,
-                    definitions: None,
                     minimum: None,
                     maximum: None,
                 },
@@ -58,7 +60,6 @@ fn get_property(shape: &facet::Shape) -> Property {
                     }),
                     required: None,
                     properties: None,
-                    definitions: None,
                     minimum: None,
                     maximum: None,
                 },
@@ -74,7 +75,6 @@ fn get_property(shape: &facet::Shape) -> Property {
                 format: None,
                 required: None,
                 properties: None,
-                definitions: None,
                 minimum: None,
                 maximum: None,
             },
@@ -83,7 +83,6 @@ fn get_property(shape: &facet::Shape) -> Property {
                 format: None,
                 required: None,
                 properties: None,
-                definitions: None,
                 minimum: None,
                 maximum: None,
             },
@@ -97,8 +96,6 @@ fn get_property(shape: &facet::Shape) -> Property {
 
         facet::Def::Struct(struct_def) => match struct_def.kind {
             facet::StructKind::Struct => {
-                let mut definitions = HashMap::new();
-
                 Property::Type {
                     r#type: Type::Object,
                     format: None,
@@ -119,15 +116,18 @@ fn get_property(shape: &facet::Shape) -> Property {
                                 if is_struct(field.shape) {
                                     let struct_name = get_type_name(field.shape);
                                     let struct_ref = format!("#/definitions/{struct_name}");
-                                    definitions.insert(struct_name, get_property(field.shape));
+                                    let (property, new_definitions) = analyze_shape(field.shape);
+                                    definitions.insert(struct_name, property);
+                                    definitions.extend(new_definitions);
                                     (field.name.to_owned(), Property::Ref { r#ref: struct_ref })
                                 } else {
-                                    (field.name.to_owned(), get_property(field.shape))
+                                    let (property, new_definitions) = analyze_shape(field.shape);
+                                    definitions.extend(new_definitions);
+                                    (field.name.to_owned(), property)
                                 }
                             })
                             .collect(),
                     ),
-                    definitions: (!definitions.is_empty()).then_some(definitions),
                     minimum: None,
                     maximum: None,
                 }
@@ -141,7 +141,6 @@ fn get_property(shape: &facet::Shape) -> Property {
             format: None,
             required: None,
             properties: None,
-            definitions: None,
             minimum: None,
             maximum: None,
         },
@@ -150,18 +149,20 @@ fn get_property(shape: &facet::Shape) -> Property {
             format: None,
             required: None,
             properties: None,
-            definitions: None,
             minimum: None,
             maximum: None,
         },
         facet::Def::Enum(_) => Property::AnyOf(todo!()),
         _ => panic!("AAAAAA I can't deal with being in the future"),
-    }
+    };
+    (property, definitions)
 }
 
 fn is_struct(shape: &facet::Shape) -> bool {
     matches!(shape.def, facet::Def::Struct(_))
 }
+
+type Definitions = HashMap<String, Property>;
 
 #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Schema {
@@ -170,6 +171,8 @@ pub struct Schema {
     title: String,
     #[serde(flatten)]
     root_property: Property,
+    #[serde(default, skip_serializing_if = "Definitions::is_empty")]
+    definitions: Definitions,
 }
 
 #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -194,8 +197,6 @@ pub enum Property {
         required: Option<Vec<String>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         properties: Option<HashMap<String, Property>>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        definitions: Option<HashMap<String, Property>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         minimum: Option<i128>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -262,6 +263,29 @@ mod tests {
         assert_eq!(
             schema::<WowSoTest>(),
             serde_json::from_str(include_str!("../test_data/nested_struct.json")).unwrap(),
+        )
+    }
+
+    #[test]
+    fn test_double_nested_struct() {
+        #[derive(facet_derive::Facet)]
+        struct WowSoTest {
+            outer: i32,
+            inner: InnerWowSoTest,
+        }
+        #[derive(facet_derive::Facet)]
+        struct InnerWowSoTest {
+            payload: i32,
+            subinner: InnerInnerWowSoTest,
+        }
+        #[derive(facet_derive::Facet)]
+        struct InnerInnerWowSoTest {
+            payload2: i32,
+        }
+
+        assert_eq!(
+            schema::<WowSoTest>(),
+            serde_json::from_str(include_str!("../test_data/double_nested_struct.json")).unwrap(),
         )
     }
 }

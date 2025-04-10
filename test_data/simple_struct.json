@@ -21,7 +21,7 @@
     },
     "happening": {
       "type": "integer",
-      "format": "uint"
+      "format": "uint64"
     }
   }
 }
