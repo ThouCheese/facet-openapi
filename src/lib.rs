@@ -1,10 +1,10 @@
 use std::{collections::HashMap, fmt::Formatter};
 
 pub fn schema<T: facet::Facet>() -> Schema {
-    let (root_property, definitions) = analyze_shape(T::SHAPE);
+    let (root_property, definitions, title) = analyze_shape(T::SHAPE);
     Schema {
         schema: "http://json-schema.org/draft-07/schema#",
-        title: get_type_name(T::SHAPE),
+        title,
         root_property,
         definitions,
     }
@@ -20,13 +20,13 @@ fn get_type_name(shape: &facet::Shape) -> String {
     format!("{}", MyTypeName(shape.vtable.type_name))
 }
 
-fn analyze_shape(shape: &facet::Shape) -> (Property, Definitions) {
+fn analyze_shape(shape: &facet::Shape) -> (Property, Definitions, String) {
     let mut definitions = Definitions::new();
     let property = match shape.def {
         facet::Def::Scalar(scalar_def) => match scalar_def.affinity {
             facet::ScalarAffinity::Number(number_affinity) => match number_affinity.bits {
                 facet::NumberBits::Integer { bits, sign } => Property::Type {
-                    r#type: Type::Integer,
+                    r#type: TypeOrTypes::Type(Type::Integer),
                     format: Some(match (bits, sign) {
                         (8, facet::Signedness::Signed) => TypeFormat::Int8,
                         (16, facet::Signedness::Signed) => TypeFormat::Int16,
@@ -42,7 +42,7 @@ fn analyze_shape(shape: &facet::Shape) -> (Property, Definitions) {
                         (_, facet::Signedness::Unsigned) => TypeFormat::Uint,
                         (_, _neither_signed_nor_unsigned_ha) => todo!(),
                     }),
-                    required: None,
+                    required: vec![],
                     properties: None,
                     minimum: None,
                     maximum: None,
@@ -52,13 +52,13 @@ fn analyze_shape(shape: &facet::Shape) -> (Property, Definitions) {
                     exponent_bits,
                     mantissa_bits,
                 } => Property::Type {
-                    r#type: Type::Number,
+                    r#type: TypeOrTypes::Type(Type::Number),
                     format: Some(match (sign_bits, exponent_bits, mantissa_bits) {
                         (1, 8, 23) => TypeFormat::Float,
                         (1, 11, 52) => TypeFormat::Double,
                         _ => panic!("AAAAA"),
                     }),
-                    required: None,
+                    required: vec![],
                     properties: None,
                     minimum: None,
                     maximum: None,
@@ -71,17 +71,17 @@ fn analyze_shape(shape: &facet::Shape) -> (Property, Definitions) {
                 _ => todo!(),
             },
             facet::ScalarAffinity::String(string_affinity) => Property::Type {
-                r#type: Type::String,
+                r#type: TypeOrTypes::Type(Type::String),
                 format: None,
-                required: None,
+                required: vec![],
                 properties: None,
                 minimum: None,
                 maximum: None,
             },
             facet::ScalarAffinity::Boolean(bool_affinity) => Property::Type {
-                r#type: Type::Boolean,
+                r#type: TypeOrTypes::Type(Type::Boolean),
                 format: None,
-                required: None,
+                required: vec![],
                 properties: None,
                 minimum: None,
                 maximum: None,
@@ -95,67 +95,125 @@ fn analyze_shape(shape: &facet::Shape) -> (Property, Definitions) {
         },
 
         facet::Def::Struct(struct_def) => match struct_def.kind {
-            facet::StructKind::Struct => {
-                Property::Type {
-                    r#type: Type::Object,
-                    format: None,
-                    required: Some(
-                        struct_def
-                            .fields
-                            .iter()
-                            // lmao
-                            .filter(|field| get_type_name(field.shape) != "Option")
-                            .map(|field| field.name.to_owned())
-                            .collect(),
-                    ),
-                    properties: Some(
-                        struct_def
-                            .fields
-                            .iter()
-                            .map(|field| {
-                                if is_struct(field.shape) {
-                                    let struct_name = get_type_name(field.shape);
-                                    let struct_ref = format!("#/definitions/{struct_name}");
-                                    let (property, new_definitions) = analyze_shape(field.shape);
-                                    definitions.insert(struct_name, property);
-                                    definitions.extend(new_definitions);
-                                    (field.name.to_owned(), Property::Ref { r#ref: struct_ref })
-                                } else {
-                                    let (property, new_definitions) = analyze_shape(field.shape);
-                                    definitions.extend(new_definitions);
-                                    (field.name.to_owned(), property)
-                                }
-                            })
-                            .collect(),
-                    ),
-                    minimum: None,
-                    maximum: None,
-                }
-            }
+            facet::StructKind::Struct => Property::Type {
+                r#type: TypeOrTypes::Type(Type::Object),
+                format: None,
+                required: struct_def
+                    .fields
+                    .iter()
+                    .filter(|field| !matches!(field.shape.def, facet::Def::Option(_)))
+                    .map(|field| field.name.to_owned())
+                    .collect(),
+
+                properties: Some(
+                    struct_def
+                        .fields
+                        .iter()
+                        .map(|field| {
+                            if is_struct(field.shape) {
+                                let (property, new_definitions, name) = analyze_shape(field.shape);
+                                let struct_ref = format!("#/definitions/{name}");
+                                definitions.insert(name, property);
+                                definitions.extend(new_definitions);
+                                (field.name.to_owned(), Property::Ref { r#ref: struct_ref })
+                            } else {
+                                let (property, new_definitions, name) = analyze_shape(field.shape);
+                                definitions.extend(new_definitions);
+                                (field.name.to_owned(), property)
+                            }
+                        })
+                        .collect(),
+                ),
+                minimum: None,
+                maximum: None,
+            },
             facet::StructKind::TupleStruct => todo!(),
             facet::StructKind::Tuple => todo!(),
             _ => todo!(),
         },
-        facet::Def::Map(_) => Property::Type {
-            r#type: Type::Object,
+        facet::Def::Map(map_def) => Property::Type {
+            r#type: TypeOrTypes::Type(Type::Object),
             format: None,
-            required: None,
+            required: vec![],
             properties: None,
             minimum: None,
             maximum: None,
         },
-        facet::Def::List(_) => Property::Type {
-            r#type: Type::Array,
+        facet::Def::List(list_def) => Property::Type {
+            r#type: TypeOrTypes::Type(Type::Array),
             format: None,
-            required: None,
+            required: vec![],
             properties: None,
             minimum: None,
             maximum: None,
         },
-        facet::Def::Enum(_) => Property::AnyOf(todo!()),
+        facet::Def::Option(option_def) => {
+            let (property_inner, new_definitions, name) = analyze_shape(option_def.t);
+            let new_property = match property_inner {
+                Property::Type {
+                    r#type: TypeOrTypes::Type(Type::Object),
+                    format,
+                    required,
+                    properties,
+                    minimum,
+                    maximum,
+                } => {
+                    definitions.insert(
+                        name.clone(),
+                        Property::Type {
+                            r#type: TypeOrTypes::Type(Type::Object),
+                            format,
+                            required,
+                            properties,
+                            minimum,
+                            maximum,
+                        },
+                    );
+                    Property::AnyOf {
+                        any_of: vec![
+                            Property::Ref {
+                                r#ref: format!("#/definitions/{name}"),
+                            },
+                            Property::Type {
+                                r#type: TypeOrTypes::Type(Type::Null),
+                                format: None,
+                                required: vec![],
+                                properties: None,
+                                minimum: None,
+                                maximum: None,
+                            },
+                        ],
+                    }
+                }
+                Property::Type {
+                    r#type,
+                    format,
+                    required,
+                    properties,
+                    minimum,
+                    maximum,
+                } => Property::Type {
+                    r#type: TypeOrTypes::Types({
+                        let mut types: Vec<_> = r#type.into_iter().chain([Type::Null]).collect();
+                        types.sort();
+                        types.dedup();
+                        types
+                    }),
+                    format,
+                    required,
+                    properties,
+                    minimum,
+                    maximum,
+                },
+                other => other,
+            };
+            definitions.extend(new_definitions);
+            new_property
+        }
+        facet::Def::Enum(_) => Property::AnyOf { any_of: todo!() },
         _ => panic!("AAAAAA I can't deal with being in the future"),
     };
-    (property, definitions)
+    (property, definitions, get_type_name(shape))
 }
 
 fn is_struct(shape: &facet::Shape) -> bool {
@@ -175,7 +233,8 @@ pub struct Schema {
     definitions: Definitions,
 }
 
-#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Type {
     Object,
@@ -184,17 +243,18 @@ pub enum Type {
     Number,
     Array,
     String,
+    Null,
 }
 
 #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum Property {
     Type {
-        r#type: Type,
+        r#type: TypeOrTypes,
         #[serde(skip_serializing_if = "Option::is_none")]
         format: Option<TypeFormat>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        required: Option<Vec<String>>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        required: Vec<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         properties: Option<HashMap<String, Property>>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -206,7 +266,29 @@ pub enum Property {
         #[serde(rename = "$ref")]
         r#ref: String,
     },
-    AnyOf(Vec<Type>),
+    AnyOf {
+        #[serde(rename = "anyOf")]
+        any_of: Vec<Property>,
+    },
+}
+
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum TypeOrTypes {
+    Type(Type),
+    Types(Vec<Type>),
+}
+
+impl IntoIterator for TypeOrTypes {
+    type Item = Type;
+    type IntoIter = <Vec<Type> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            TypeOrTypes::Type(t) => vec![t].into_iter(),
+            TypeOrTypes::Types(items) => items.into_iter(),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -286,6 +368,29 @@ mod tests {
         assert_eq!(
             schema::<WowSoTest>(),
             serde_json::from_str(include_str!("../test_data/double_nested_struct.json")).unwrap(),
+        )
+    }
+
+    #[test]
+    fn test_option_fields() {
+        #[derive(facet_derive::Facet)]
+        struct WowSoTest {
+            needed: i32,
+            nice_to_have: Option<i32>,
+            nested: InnerWowSoTest,
+        }
+        #[derive(facet_derive::Facet)]
+        struct InnerWowSoTest {
+            subinner: Option<InnerInnerWowSoTest>,
+        }
+        #[derive(facet_derive::Facet)]
+        struct InnerInnerWowSoTest {
+            payload: i32,
+        }
+
+        assert_eq!(
+            schema::<WowSoTest>(),
+            serde_json::from_str(include_str!("../test_data/option_fields.json")).unwrap(),
         )
     }
 }

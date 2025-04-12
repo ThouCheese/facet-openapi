@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WowSoTest",
+  "type": "object",
+  "required": [
+    "needed",
+    "nested"
+  ],
+  "properties": {
+    "needed": {
+      "type": "integer",
+      "format": "int32"
+    },
+    "nested": {
+      "$ref": "#/definitions/InnerWowSoTest"
+    },
+    "nice_to_have": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "int32"
+    }
+  },
+  "definitions": {
+    "InnerInnerWowSoTest": {
+      "type": "object",
+      "required": [
+        "payload"
+      ],
+      "properties": {
+        "payload": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
+    "InnerWowSoTest": {
+      "type": "object",
+      "properties": {
+        "subinner": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/InnerInnerWowSoTest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    }
+  }
+}
