@@ -393,4 +393,17 @@ mod tests {
             serde_json::from_str(include_str!("../test_data/option_fields.json")).unwrap(),
         )
     }
+
+    #[test]
+    fn test_double_option() {
+        #[derive(facet_derive::Facet)]
+        struct WowSoTest {
+            field: Option<Option<i32>>,
+        }
+
+        assert_eq!(
+            schema::<WowSoTest>(),
+            serde_json::from_str(include_str!("../test_data/double_option.json")).unwrap(),
+        )
+    }
 }
